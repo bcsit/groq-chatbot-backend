@@ -1,45 +1,67 @@
-import express from "express";
-import cors from "cors";
-import fetch from "node-fetch"; // only if Node <18
+const express = require('express');
+const fetch = require('node-fetch'); // for Node <18, else built-in fetch works
+const cors = require('cors');
 
 const app = express();
-app.use(cors()); // Allow frontend to talk to backend
+const PORT = process.env.PORT || 3000;
+
+// Enable JSON body parsing
 app.use(express.json());
 
-app.get("/", (req, res) => {
-  res.send("Groq chatbot backend is running!");
+// Enable CORS for all origins (so your website can call the API)
+app.use(cors());
+
+// Load Groq API key from environment variable
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const GROQ_MODEL = process.env.GROQ_MODEL || "llama3-8b-8192";
+
+// Health check endpoint
+app.get('/', (req, res) => {
+    res.send("Groq chatbot backend is running!");
 });
 
-app.post("/chat", async (req, res) => {
-  const { message, chat_history } = req.body;
+// Chat endpoint
+app.post('/chat', async (req, res) => {
+    const userMessage = req.body.message;
+    if (!userMessage) return res.json({ reply: "Please send a message!" });
 
-  try {
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: "llama3-8b-8192",
-        messages: [
-          { role: "system", content: "You are a helpful BCSIT Notes assistant." },
-          ...(chat_history || []),
-          { role: "user", content: message }
-        ]
-      })
-    });
+    if (!GROQ_API_KEY) {
+        return res.json({ reply: "Groq API Key is not configured on Render." });
+    }
 
-    const data = await response.json();
-    const reply = data.choices?.[0]?.message?.content || "Sorry, I couldn't process that.";
+    try {
+        const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${GROQ_API_KEY}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                model: GROQ_MODEL,
+                messages: [
+                    { role: "system", content: "You are 'BCSIT AI', the official virtual assistant for BCSIT Notes portal." },
+                    { role: "user", content: userMessage }
+                ],
+                temperature: 0.7,
+                max_tokens: 1024
+            })
+        });
 
-    return res.json({ reply });
+        const result = await response.json();
 
-  } catch (err) {
-    console.error("Error in /chat:", err);
-    res.status(500).json({ reply: "Backend error." });
-  }
+        if (response.ok && result.choices && result.choices[0]?.message?.content) {
+            return res.json({ reply: result.choices[0].message.content });
+        } else {
+            console.error("Groq API error:", result);
+            return res.json({ reply: "Sorry, I couldn't process that." });
+        }
+    } catch (err) {
+        console.error("Server error:", err);
+        return res.json({ reply: "Sorry, there was a server error. Try again later." });
+    }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+// Start server
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+});
